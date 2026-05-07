@@ -82,7 +82,7 @@ function allowedOrigin(req) {
 function setCorsHeaders(req, res) {
   const origin = req.headers.origin || '';
 
-  if (!origin || !allowedOrigin(req)) {
+  if (!origin) {
     return false;
   }
 
@@ -109,6 +109,23 @@ function readBody(req) {
     req.on('end', () => resolve(data));
     req.on('error', reject);
   });
+}
+
+function parsePayload(req, raw) {
+  const contentType = normalize(req.headers['content-type']).toLowerCase();
+
+  if (contentType.includes('application/json')) {
+    return JSON.parse(raw || '{}');
+  }
+
+  if (
+    contentType.includes('application/x-www-form-urlencoded') ||
+    contentType.includes('multipart/form-data')
+  ) {
+    return Object.fromEntries(new URLSearchParams(raw || ''));
+  }
+
+  return JSON.parse(raw || '{}');
 }
 
 function renderEmail({ name, phone, pet, subject, message }) {
@@ -202,7 +219,7 @@ module.exports = async function handler(req, res) {
 
   if (req.method === 'OPTIONS') {
     if (!setCorsHeaders(req, res)) {
-      json(res, 403, { error: 'Forbidden origin' });
+      json(res, 400, { error: 'Missing origin' });
       return;
     }
 
@@ -216,12 +233,12 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  setCorsHeaders(req, res);
+
   if (!allowedOrigin(req)) {
     json(res, 403, { error: 'Forbidden origin' });
     return;
   }
-
-  setCorsHeaders(req, res);
 
   const transporter = getSmtpTransporter();
   const mailFrom = getMailFrom();
@@ -239,9 +256,9 @@ module.exports = async function handler(req, res) {
 
   try {
     const raw = await readBody(req);
-    payload = JSON.parse(raw || '{}');
+    payload = parsePayload(req, raw);
   } catch (error) {
-    json(res, 400, { error: 'Invalid JSON payload' });
+    json(res, 400, { error: 'Invalid payload' });
     return;
   }
 
