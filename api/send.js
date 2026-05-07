@@ -3,6 +3,7 @@ const nodemailer = require('nodemailer');
 const MIN_FORM_AGE_MS = 3000;
 const MAX_MESSAGE_LENGTH = 5000;
 const MAX_FIELD_LENGTH = 500;
+const DEFAULT_SUBJECT = 'Заявка с сайта ИВВС';
 let cachedTransporter = null;
 
 function json(res, statusCode, body) {
@@ -27,6 +28,14 @@ function escapeHtml(value) {
 
 function plainText(value) {
   return normalize(value).replace(/\r\n/g, '\n');
+}
+
+function normalizeConsent(value) {
+  if (value === true || value === 'true' || value === 'on' || value === '1') {
+    return true;
+  }
+
+  return false;
 }
 
 function parseOrigins(raw) {
@@ -88,44 +97,37 @@ function readBody(req) {
   });
 }
 
-function renderEmail({ name, email, subject, message, startedAt, userAgent }) {
+function renderEmail({ name, phone, pet, subject, message }) {
   const safeName = escapeHtml(name);
-  const safeEmail = escapeHtml(email);
+  const safePhone = escapeHtml(phone);
+  const safePet = escapeHtml(pet);
   const safeSubject = escapeHtml(subject);
   const safeMessage = escapeHtml(message).replace(/\n/g, '<br>');
-  const safeUserAgent = escapeHtml(userAgent || 'n/a');
-  const ageMs = Date.now() - startedAt;
 
   return {
-    subject: subject || `Новая заявка с формы от ${name}`,
+    subject: subject || DEFAULT_SUBJECT,
     html: `
       <div style="font-family:Arial,sans-serif;line-height:1.6;color:#1f2328">
         <h2 style="margin:0 0 12px">Новая заявка с сайта</h2>
         <p style="margin:0 0 8px"><strong>Имя:</strong> ${safeName}</p>
-        <p style="margin:0 0 8px"><strong>Email:</strong> ${safeEmail}</p>
+        <p style="margin:0 0 8px"><strong>Телефон:</strong> ${safePhone}</p>
+        <p style="margin:0 0 8px"><strong>Питомец:</strong> ${safePet || '—'}</p>
         <p style="margin:0 0 8px"><strong>Тема:</strong> ${safeSubject || '—'}</p>
         <p style="margin:0 0 8px"><strong>Сообщение:</strong></p>
         <div style="padding:12px 14px;background:#f6f8fa;border-radius:12px;border:1px solid #e5e7eb">
-          ${safeMessage}
+          ${safeMessage || '—'}
         </div>
-        <hr style="border:0;border-top:1px solid #e5e7eb;margin:16px 0" />
-        <p style="margin:0;font-size:12px;color:#6b7280">
-          Form age: ${ageMs} ms<br />
-          User-Agent: ${safeUserAgent}
-        </p>
       </div>
     `,
     text: [
       'Новая заявка с сайта',
       `Имя: ${plainText(name)}`,
-      `Email: ${plainText(email)}`,
+      `Телефон: ${plainText(phone)}`,
+      `Питомец: ${plainText(pet) || '—'}`,
       `Тема: ${plainText(subject) || '—'}`,
       '',
       'Сообщение:',
-      plainText(message),
-      '',
-      `Form age: ${ageMs} ms`,
-      `User-Agent: ${plainText(userAgent || 'n/a')}`,
+      plainText(message) || '—',
     ].join('\n'),
   };
 }
@@ -230,30 +232,21 @@ module.exports = async function handler(req, res) {
   }
 
   const name = normalize(payload.name).slice(0, MAX_FIELD_LENGTH);
-  const email = normalize(payload.email).slice(0, MAX_FIELD_LENGTH);
+  const phone = normalize(payload.phone).slice(0, MAX_FIELD_LENGTH);
+  const pet = normalize(payload.pet).slice(0, MAX_FIELD_LENGTH);
   const subject = normalize(payload.subject).slice(0, MAX_FIELD_LENGTH);
   const message = normalize(payload.message).slice(0, MAX_MESSAGE_LENGTH);
   const website = normalize(payload.website);
   const startedAt = Number.parseInt(payload.startedAt, 10);
-  const userAgent = normalize(req.headers['user-agent']);
+  const consent = normalizeConsent(payload.consent);
 
   if (website) {
     json(res, 400, { error: 'Spam detected' });
     return;
   }
 
-  if (!name || !email || !message) {
-    json(res, 400, { error: 'Name, email and message are required' });
-    return;
-  }
-
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    json(res, 400, { error: 'Invalid email address' });
-    return;
-  }
-
-  if (message.length < 10) {
-    json(res, 400, { error: 'Message is too short' });
+  if (!name || !phone || !consent) {
+    json(res, 400, { error: 'Name, phone and consent are required' });
     return;
   }
 
@@ -262,7 +255,7 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  const body = renderEmail({ name, email, subject, message, startedAt, userAgent });
+  const body = renderEmail({ name, phone, pet, subject, message });
 
   try {
     const info = await transporter.sendMail({
@@ -271,7 +264,6 @@ module.exports = async function handler(req, res) {
       subject: body.subject,
       html: body.html,
       text: body.text,
-      replyTo: email,
     });
 
     json(res, 200, { ok: true, id: info.messageId });
