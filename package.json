@@ -1,0 +1,9 @@
+{
+  "name": "sendmail",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Secure Vercel form that forwards submissions to email via SMTP.",
+  "dependencies": {
+    "nodemailer": "^6.10.1"
+  }
+}
