@@ -38,24 +38,38 @@ function normalizeConsent(value) {
   return false;
 }
 
+function normalizeOrigin(value) {
+  const candidate = normalize(value);
+
+  if (!candidate) {
+    return '';
+  }
+
+  try {
+    return new URL(candidate).origin;
+  } catch (error) {
+    return candidate.replace(/\/+$/, '');
+  }
+}
+
 function parseOrigins(raw) {
   return String(raw || '')
     .split(',')
-    .map((origin) => origin.trim())
+    .map(normalizeOrigin)
     .filter(Boolean);
 }
 
 function getRequestOrigin(req) {
   const host = req.headers['x-forwarded-host'] || req.headers.host;
   const proto = req.headers['x-forwarded-proto'] || 'https';
-  return host ? `${proto}://${host}` : '';
+  return host ? normalizeOrigin(`${proto}://${host}`) : '';
 }
 
 function allowedOrigin(req) {
   const configured = parseOrigins(
     [process.env.SITE_ORIGIN, process.env.ALLOWED_ORIGINS].filter(Boolean).join(',')
   );
-  const requestOrigin = req.headers.origin || '';
+  const requestOrigin = normalizeOrigin(req.headers.origin || '');
   const fallbackOrigin = getRequestOrigin(req);
 
   if (configured.length > 0) {
